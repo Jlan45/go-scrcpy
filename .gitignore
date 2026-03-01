@@ -1,0 +1,8 @@
+# scrcpy upstream source (reference only, not part of this module)
+scrcpy-source/
+
+# Go build artifacts
+*.exe
+*.test
+*.out
+/dist/
