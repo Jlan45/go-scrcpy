@@ -18,22 +18,27 @@
 //
 // # Quick start
 //
-//	// Read handshake from video connection
-//	info, _ := scrcpy.ReadDeviceInfo(videoConn)
-//	video, _ := scrcpy.ReadVideoInfo(videoConn)
+// scrcpy uses a reverse tunnel by default: the Android server connects back
+// to the desktop, so the desktop must listen first.
 //
-//	// Read video packets in a loop
-//	for {
-//	    pkt, _ := scrcpy.ReadPacket(videoConn)
-//	    // pkt.Data contains raw H.264/H.265/AV1 NAL units
+//	// adb reverse localabstract:scrcpy tcp:27183
+//	ln, _ := net.Listen("tcp", "127.0.0.1:27183")
+//	videoConn, _ := ln.Accept() // video (first)
+//	audioConn, _ := ln.Accept() // audio (second)
+//	ctrlConn,  _ := ln.Accept() // control (third)
+//
+//	sess, _ := scrcpy.NewSession(videoConn, audioConn, ctrlConn, scrcpy.SessionOptions{})
+//	defer sess.Close()
+//
+//	for frame := range sess.Frames.Frames() {
+//	    // frame.Config != nil → reinit decoder
+//	    // frame.Data = encoded NAL units / AV1 OBUs
 //	}
 //
-//	// Send a touch event on the control connection
-//	msg := scrcpy.BuildInjectTouchEvent(
+//	sess.Control.InjectTouchEvent(
 //	    scrcpy.MotionActionDown, scrcpy.PointerIDMouse,
 //	    scrcpy.Point{X: 540, Y: 960},
 //	    scrcpy.Size{Width: 1080, Height: 1920},
 //	    1.0, 0, scrcpy.ButtonPrimary,
 //	)
-//	controlConn.Write(msg)
 package scrcpy

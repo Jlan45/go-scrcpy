@@ -12,17 +12,39 @@ go get github.com/Jlan45/go-scrcpy
 
 ## 连接模型
 
-scrcpy v2+ 使用**三条独立 TCP 连接**：
+### TCP 连接方向
+
+scrcpy 默认使用 **reverse tunnel** 模式：**Android 服务端主动连接回 PC**，PC 侧用 `net.Listen` 监听并依次 `Accept` 三条连接。
 
 ```
-视频连接  →  握手读取  →  循环读取视频数据包
-音频连接  →  握手读取  →  循环读取音频数据包
-控制连接  →  握手读取  →  双向：发送控制消息 / 读取设备消息
+PC                               Android
+net.Listen(":27183")  ←──────  scrcpy-server 发起连接 ×3
+  Accept() → videoConn          （第 1 条）
+  Accept() → audioConn          （第 2 条）
+  Accept() → ctrlConn           （第 3 条）
 ```
 
-每条连接建立后，服务端都会先发送 64 字节设备名。视频连接额外发送编解码器 ID 和初始分辨率，音频连接额外发送编解码器 ID。
+ADB 反向隧道命令：
 
-使用 ADB 建立端口转发（通常是 `adb forward tcp:27183 localabstract:scrcpy`），然后用标准 `net.Dial` 连接，得到的 `net.Conn` 可以直接传入本库的所有函数。
+```bash
+adb reverse localabstract:scrcpy tcp:27183
+```
+
+### 流的数量
+
+连接数取决于服务端启动参数，接受顺序固定为 **视频 → 音频 → 控制**：
+
+| 参数 | 连接数 | Accept 顺序 |
+|------|--------|-------------|
+| 默认 | 3 | video, audio, control |
+| `--no-audio` | 2 | video, control |
+| `--no-video` | 2 | audio, control |
+| `--no-control` | 2 | video, audio |
+| `--no-video --no-audio` | 1 | control |
+
+### 握手
+
+每条连接建立后，**服务端**首先发送 64 字节设备名。视频连接额外发送 codec ID + 初始分辨率，音频连接额外发送 codec ID，控制连接无额外握手数据。
 
 ## 快速上手
 
@@ -42,20 +64,27 @@ import (
 )
 
 func main() {
-    // 假设已通过 adb forward 建立端口转发：
-    //   adb forward tcp:27183 localabstract:scrcpy
-    // scrcpy v2+ 按顺序建立三条连接（视频、音频、控制）
-    dial := func() net.Conn {
-        c, err := net.Dial("tcp", "127.0.0.1:27183")
+    // 1. 启动监听，等待 Android 服务端连接
+    //    需先运行：adb reverse localabstract:scrcpy tcp:27183
+    //    再启动设备上的 scrcpy-server
+    ln, err := net.Listen("tcp", "127.0.0.1:27183")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer ln.Close()
+
+    // 2. 按顺序 Accept 三条连接：video → audio → control
+    accept := func() net.Conn {
+        c, err := ln.Accept()
         if err != nil {
             log.Fatal(err)
         }
         return c
     }
 
-    videoConn := dial()
-    audioConn := dial()
-    ctrlConn  := dial()
+    videoConn := accept()
+    audioConn := accept()
+    ctrlConn  := accept()
     defer videoConn.Close()
     defer audioConn.Close()
     defer ctrlConn.Close()
@@ -149,16 +178,32 @@ package main
 
 import (
     "fmt"
+    "log"
     "net"
 
     scrcpy "github.com/Jlan45/go-scrcpy"
 )
 
 func main() {
-    // 假设已通过 adb forward 建立端口转发
-    videoConn, _ := net.Dial("tcp", "127.0.0.1:27183")
-    audioConn, _ := net.Dial("tcp", "127.0.0.1:27183")
-    ctrlConn, _  := net.Dial("tcp", "127.0.0.1:27183")
+    // adb reverse localabstract:scrcpy tcp:27183
+    ln, err := net.Listen("tcp", "127.0.0.1:27183")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer ln.Close()
+
+    accept := func() net.Conn {
+        c, err := ln.Accept()
+        if err != nil {
+            log.Fatal(err)
+        }
+        return c
+    }
+
+    // Android 服务端按顺序发起三条连接
+    videoConn := accept()
+    audioConn := accept()
+    ctrlConn  := accept()
     defer videoConn.Close()
     defer audioConn.Close()
     defer ctrlConn.Close()
